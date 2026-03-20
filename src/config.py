@@ -82,19 +82,35 @@ REJECT_KEYWORDS: List[str] = [
 ]
 
 ICP_TITLES: List[str] = [
+    # Core HR / Talent titles
     "Director of Talent Acquisition",
     "VP Human Resources",
     "Chief People Officer",
     "CHRO",
     "Head of Talent Acquisition",
-    "CEO",
-    "Founder and CEO",
-    "Owner",
-    "Senior Recruiter",
     "HR Manager",
+    "Senior Recruiter",
     "Technical Recruiter",
     "Headhunter",
     "Human Capital Strategist",
+    # C-suite decision makers (budget owners / hiring decision makers)
+    "CEO",
+    "Chief Executive Officer",
+    "Founder and CEO",
+    "Co-Founder and CEO",
+    "Owner",
+    "President and CEO",
+    "COO",
+    "Chief Operating Officer",
+    "CFO",
+    "Chief Financial Officer",
+    "CTO",
+    "Chief Technology Officer",
+    "CIO",
+    "Chief Information Officer",
+    "Managing Director",
+    "General Manager",
+    "President",
 ]
 
 MODEL_NAME = "BAAI/bge-small-en-v1.5"

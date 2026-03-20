@@ -69,21 +69,58 @@ class DataIngestor:
             df["phone"] = ""
             df["source_type"] = "PhantomBuster"
 
-        # Apollo exports
+        # Apollo exports (full — has Departments + Seniority columns)
         elif "Departments" in cols and "Seniority" in cols:
             df = df.rename(
                 columns={
-                    "Name": "name",
                     "Title": "title",
                     "Company": "company",
                     "Email": "email",
                     "Linkedin Profile Link": "linkedin",
+                    "Person Linkedin Url": "linkedin",
                     "Industry": "industry",
                     "# Employees": "num_employees",
                 }
             )
-            df["phone"] = ""
+            # Build name from First Name + Last Name (full Apollo has no combined Name col)
+            if "Name" in df.columns:
+                df["name"] = df["Name"].fillna("").astype(str).str.strip()
+            else:
+                first = df.get("First Name", pd.Series("", index=df.index)).fillna("").astype(str).str.strip()
+                last = df.get("Last Name", pd.Series("", index=df.index)).fillna("").astype(str).str.strip()
+                df["name"] = (first + " " + last).str.strip()
+            df["phone"] = df.get(
+                "Work Direct Phone",
+                df.get("Mobile Phone", pd.Series("", index=df.index))
+            ).fillna("").astype(str)
             df["source_type"] = "Apollo"
+
+        # Simplified Apollo/export — Name/Email/LinkedIn present, no Departments column
+        # Handles BOM (\ufeff) variant of "First Name" that appears in many files
+        elif "Email" in cols and ("LinkedIn" in cols or "Person Linkedin Url" in cols):
+            # Strip BOM from column names
+            df.columns = [c.lstrip("\ufeff") for c in df.columns]
+            cols = set(df.columns)
+
+            # Build name: prefer "Name" if present, else combine First + Last
+            if "Name" in cols:
+                df["name"] = df["Name"].fillna("").astype(str).str.strip()
+            else:
+                first = df.get("First Name", pd.Series("", index=df.index)).fillna("").astype(str).str.strip()
+                last = df.get("Last Name", pd.Series("", index=df.index)).fillna("").astype(str).str.strip()
+                df["name"] = (first + " " + last).str.strip()
+
+            df["title"] = df.get("Title", pd.Series("", index=df.index)).fillna("").astype(str)
+            df["company"] = df.get("Company", pd.Series("", index=df.index)).fillna("").astype(str)
+            df["email"] = df.get("Email", pd.Series("", index=df.index)).fillna("").astype(str)
+            df["phone"] = ""
+            df["linkedin"] = df.get(
+                "LinkedIn",
+                df.get("Person Linkedin Url", pd.Series("", index=df.index))
+            ).fillna("").astype(str)
+            df["industry"] = df.get("Industry", pd.Series("", index=df.index)).fillna("").astype(str)
+            df["num_employees"] = np.nan
+            df["source_type"] = "Apollo-Simplified"
 
         # Aggregated exports (EasySource / RocketReach style)
         elif "Current Position" in cols and "Preferred Email" in cols:

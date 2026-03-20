@@ -156,16 +156,32 @@ class ICPEngine:
         founder_owner_mask = to_score["title"].str.contains(
             r"\bfounder\b|co-founder|\bowner\b|co-owner", na=False, regex=True
         )
+        # C-suite pattern (titles that are hiring decision makers regardless of dept)
+        csuite_mask = to_score["title"].str.contains(
+            r"\bceo\b|\bcoo\b|\bcfo\b|\bchro\b|\bcpo\b"
+            r"|chief executive|chief operating|chief financial"
+            r"|chief technology|chief information(?! security)"
+            r"|managing director|general manager"
+            r"|\bpresident\b",
+            na=False, regex=True,
+        )
+
+        # Modest penalty for non-HR founders/owners outside HR industry
         to_score.loc[
             founder_owner_mask & ~to_score["hr_in_title"] & ~core_hr_ind, "final_score"
-        ] -= 0.20
+        ] -= 0.10
 
         to_score["bucket"] = "REJECT"
-        to_score.loc[to_score["final_score"] >= 0.49, "bucket"] = "REVIEW"
-        to_score.loc[to_score["final_score"] >= 0.62, "bucket"] = "ACCEPT"
+        to_score.loc[to_score["final_score"] >= 0.47, "bucket"] = "REVIEW"
+        to_score.loc[to_score["final_score"] >= 0.54, "bucket"] = "ACCEPT"
+
+        # HR-keyword title → ACCEPT directly
         to_score.loc[
-            to_score["hr_in_title"] & (to_score["final_score"] >= 0.52), "bucket"
+            to_score["hr_in_title"] & (to_score["final_score"] >= 0.45), "bucket"
         ] = "ACCEPT"
+        # Confirmed C-suite → ACCEPT (they own hiring budgets)
+        to_score.loc[csuite_mask & ~to_score["bad_title"], "bucket"] = "ACCEPT"
+        # Founders/owners in HR/staffing industry → ACCEPT
         to_score.loc[founder_owner_mask & core_hr_ind, "bucket"] = "ACCEPT"
 
         return pd.concat([to_score, rejects], ignore_index=True)
