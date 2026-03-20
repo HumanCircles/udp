@@ -34,7 +34,7 @@ The scorer automatically selects the best available backend:
 
 ### Optional acceleration packages
 
-For NVIDIA users who want maximum speed:
+For NVIDIA GPUs you can use max speed:
 
 ```bash
 source .venv/bin/activate
