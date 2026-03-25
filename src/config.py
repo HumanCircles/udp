@@ -25,6 +25,12 @@ HR_KEYWORDS: List[str] = [
     "people ops",
     "people operations",
     "people partner",
+    # Common People/Talent Partner title variants
+    # (lets "talent partner" and "people & culture business partner" score as HR)
+    r"\btalent\b.*\bpartner(s)?\b",
+    r"\bpeople\b.*\bculture\b.*\bpartner(s)?\b",
+    r"\bpeople\b.*\btalent\b.*\bpartner(s)?\b",
+    r"\bpeople\b.*\bbusiness partner\b",
     "people team",
     "chief.*people",
     "chief.*human",

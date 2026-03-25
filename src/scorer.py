@@ -101,8 +101,10 @@ class ICPEngine:
         ]
 
         senior_pat = (
-            r"\bceo\b|\bcoo\b|\bchro\b|\bcpo\b|founder|owner|co-owner|\bvp\b|"
-            r"director|head of|manager|partner"
+            r"\bceo\b|\bcoo\b|\bcfo\b|\bcto\b|\bcio\b|\bchro\b|\bcpo\b|"
+            r"founder|owner|co-owner|\bvp\b|\bsvp\b|\bavp\b|\bevp\b|"
+            r"vice president|director|head of|president|managing director|general manager|"
+            r"manager|partner"
         )
         out["is_senior"] = out["title"].str.contains(senior_pat, na=False, regex=True)
 
@@ -171,6 +173,21 @@ class ICPEngine:
             founder_owner_mask & ~to_score["hr_in_title"] & ~core_hr_ind, "final_score"
         ] -= 0.10
 
+        # Leadership rescue: keep strong senior profiles out of hard reject.
+        # Excludes obviously non-buyer/student-type profiles.
+        leadership_mask = to_score["title"].str.contains(
+            r"\bsvp\b|\bavp\b|\bevp\b|\bvp\b|vice president|director|head of|"
+            r"\bcfo\b|\bcto\b|\bcio\b|\bcoo\b|\bceo\b|chief|president|managing director|general manager",
+            na=False,
+            regex=True,
+        )
+        non_buyer_mask = to_score["title"].str.contains(
+            r"student|intern|assistant|coach|rabbi|professor|teacher|advisor|consultant",
+            na=False,
+            regex=True,
+        )
+        leadership_rescue_mask = leadership_mask & ~non_buyer_mask & ~to_score["bad_title"]
+
         to_score["bucket"] = "REJECT"
         to_score.loc[to_score["final_score"] >= 0.47, "bucket"] = "REVIEW"
         to_score.loc[to_score["final_score"] >= 0.54, "bucket"] = "ACCEPT"
@@ -181,6 +198,9 @@ class ICPEngine:
         ] = "ACCEPT"
         # Confirmed C-suite → ACCEPT (they own hiring budgets)
         to_score.loc[csuite_mask & ~to_score["bad_title"], "bucket"] = "ACCEPT"
+        # Strong leadership should at least be REVIEW, often ACCEPT.
+        to_score.loc[leadership_rescue_mask & (to_score["sem_score"] >= 0.58), "bucket"] = "REVIEW"
+        to_score.loc[leadership_rescue_mask & (to_score["sem_score"] >= 0.66), "bucket"] = "ACCEPT"
         # Founders/owners in HR/staffing industry → ACCEPT
         to_score.loc[founder_owner_mask & core_hr_ind, "bucket"] = "ACCEPT"
 

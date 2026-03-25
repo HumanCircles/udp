@@ -45,6 +45,8 @@ class DataIngestor:
         cls, filepath: Path, logger: Optional[Callable[[str], None]] = None
     ) -> pd.DataFrame:
         df = pd.read_csv(filepath, low_memory=False, on_bad_lines="skip")
+        # Normalize BOM-prefixed headers once for all schemas
+        df.columns = [c.lstrip("\ufeff") for c in df.columns]
         cols = set(df.columns)
 
         # PhantomBuster / LinkedIn Sales Navigator exports
@@ -97,10 +99,12 @@ class DataIngestor:
 
         # Simplified Apollo/export — Name/Email/LinkedIn present, no Departments column
         # Handles BOM (\ufeff) variant of "First Name" that appears in many files
-        elif "Email" in cols and ("LinkedIn" in cols or "Person Linkedin Url" in cols):
-            # Strip BOM from column names
-            df.columns = [c.lstrip("\ufeff") for c in df.columns]
-            cols = set(df.columns)
+        elif "Email" in cols and (
+            "LinkedIn" in cols
+            or "LinkedIn Url" in cols
+            or "Linkedin Url" in cols
+            or "Person Linkedin Url" in cols
+        ):
 
             # Build name: prefer "Name" if present, else combine First + Last
             if "Name" in cols:
@@ -111,12 +115,21 @@ class DataIngestor:
                 df["name"] = (first + " " + last).str.strip()
 
             df["title"] = df.get("Title", pd.Series("", index=df.index)).fillna("").astype(str)
-            df["company"] = df.get("Company", pd.Series("", index=df.index)).fillna("").astype(str)
+            df["company"] = df.get(
+                "Company",
+                df.get("Company Name", pd.Series("", index=df.index))
+            ).fillna("").astype(str)
             df["email"] = df.get("Email", pd.Series("", index=df.index)).fillna("").astype(str)
             df["phone"] = ""
             df["linkedin"] = df.get(
                 "LinkedIn",
-                df.get("Person Linkedin Url", pd.Series("", index=df.index))
+                df.get(
+                    "LinkedIn Url",
+                    df.get(
+                        "Linkedin Url",
+                        df.get("Person Linkedin Url", pd.Series("", index=df.index))
+                    ),
+                ),
             ).fillna("").astype(str)
             df["industry"] = df.get("Industry", pd.Series("", index=df.index)).fillna("").astype(str)
             df["num_employees"] = np.nan
