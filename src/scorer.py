@@ -155,8 +155,8 @@ class ICPEngine:
         core_hr_ind = to_score["industry"].str.contains(
             r"staffing|recruiting|human resources|hr tech", na=False, regex=True
         )
-        founder_owner_mask = to_score["title"].str.contains(
-            r"\bfounder\b|co-founder|\bowner\b|co-owner", na=False, regex=True
+        founder_mask = to_score["title"].str.contains(
+            r"\bco[\s-]?founder\b|\bfounder\b", na=False, regex=True
         )
         # C-suite pattern (titles that are hiring decision makers regardless of dept)
         csuite_mask = to_score["title"].str.contains(
@@ -168,9 +168,9 @@ class ICPEngine:
             na=False, regex=True,
         )
 
-        # Modest penalty for non-HR founders/owners outside HR industry
+        # Modest penalty for non-HR founders outside HR industry
         to_score.loc[
-            founder_owner_mask & ~to_score["hr_in_title"] & ~core_hr_ind, "final_score"
+            founder_mask & ~to_score["hr_in_title"] & ~core_hr_ind, "final_score"
         ] -= 0.10
 
         # Leadership rescue: keep strong senior profiles out of hard reject.
@@ -201,8 +201,8 @@ class ICPEngine:
         # Strong leadership should at least be REVIEW, often ACCEPT.
         to_score.loc[leadership_rescue_mask & (to_score["sem_score"] >= 0.58), "bucket"] = "REVIEW"
         to_score.loc[leadership_rescue_mask & (to_score["sem_score"] >= 0.66), "bucket"] = "ACCEPT"
-        # Founders/owners in HR/staffing industry → ACCEPT
-        to_score.loc[founder_owner_mask & core_hr_ind, "bucket"] = "ACCEPT"
+        # Founder/co-founder profiles are treated as target decision makers.
+        to_score.loc[founder_mask & ~to_score["bad_title"], "bucket"] = "ACCEPT"
 
         return pd.concat([to_score, rejects], ignore_index=True)
 
