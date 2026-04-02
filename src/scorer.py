@@ -8,7 +8,14 @@ from typing import Callable, Optional
 import numpy as np
 import pandas as pd
 
-from src.config import HR_KEYWORDS, ICP_TITLES, MODEL_NAME, REJECT_KEYWORDS
+from src.config import (
+    EXCLUDED_INDUSTRIES_PAT,
+    HR_KEYWORDS,
+    ICP_TITLES,
+    MODEL_NAME,
+    REJECT_KEYWORDS,
+    TARGET_INDUSTRIES_PAT,
+)
 
 
 @dataclass
@@ -118,16 +125,43 @@ class ICPEngine:
     def process(self, df: pd.DataFrame) -> pd.DataFrame:
         scored = self._base_rule_score(df)
 
-        hard_reject_mask = scored["bad_title"]
+        # ── Hard rejects ───────────────────────────────────────────────────
+        # 1. Bad title (non-decision-maker role not rescued by HR keywords).
+        # 2. Excluded industry (staffing / recruiting agencies).
+        # 3. Employee count definitively outside [1000, 2000].
+        excl_industry_mask = (scored["industry"] != "") & scored["industry"].str.contains(
+            EXCLUDED_INDUSTRIES_PAT, na=False, regex=True
+        )
+
+        if "emp_lower" in scored.columns and "emp_upper" in scored.columns:
+            emp_lo = pd.to_numeric(scored["emp_lower"], errors="coerce")
+            emp_hi = pd.to_numeric(scored["emp_upper"], errors="coerce")
+        else:
+            emp_lo = pd.to_numeric(scored.get("num_employees", pd.Series(dtype=float, index=scored.index)), errors="coerce")
+            emp_hi = emp_lo.copy()
+
+        emp_reject_mask = (
+            (emp_hi.notna() & (emp_hi < 1_000)) |
+            (emp_lo.notna() & (emp_lo > 2_000))
+        )
+
+        hard_reject_mask = scored["bad_title"] | excl_industry_mask | emp_reject_mask
+
+        reject_reason_series = pd.Series("bad_title", index=scored.index)
+        reject_reason_series[excl_industry_mask] = "excluded_industry"
+        reject_reason_series[emp_reject_mask] = "employee_count"
+
         rejects = scored[hard_reject_mask].copy()
         rejects["sem_score"] = 0.0
         rejects["final_score"] = 0.0
         rejects["bucket"] = "REJECT"
+        rejects["reject_reason"] = reject_reason_series.loc[rejects.index]
 
         to_score = scored[~hard_reject_mask].copy()
         if len(to_score) == 0:
             return rejects
 
+        # ── Semantic scoring ───────────────────────────────────────────────
         to_score["sem_score"] = 0.0
         if self.semantic is not None:
             self._log(f"Embedding {len(to_score)} titles...")
@@ -144,6 +178,7 @@ class ICPEngine:
                 sims = np.matmul(vecs, self.semantic.icp_vectors.T)
                 to_score["sem_score"] = sims.max(axis=1)
 
+        # ── Final score ────────────────────────────────────────────────────
         max_s = to_score["struct_score"].clip(lower=0).max() or 1
         if self.semantic is None:
             to_score["final_score"] = to_score["struct_score"].clip(lower=0) / max_s
@@ -152,29 +187,25 @@ class ICPEngine:
                 0.35 * (to_score["struct_score"].clip(lower=0) / max_s)
             )
 
-        core_hr_ind = to_score["industry"].str.contains(
-            r"staffing|recruiting|human resources|hr tech", na=False, regex=True
+        # Industry bonus: +0.12 for records in a target industry.
+        target_ind_mask = (to_score["industry"] != "") & to_score["industry"].str.contains(
+            TARGET_INDUSTRIES_PAT, na=False, regex=True
         )
+        to_score.loc[target_ind_mask, "final_score"] += 0.12
+
+        # ── Decision-maker masks ───────────────────────────────────────────
         founder_mask = to_score["title"].str.contains(
             r"\bco[\s-]?founder\b|\bfounder\b", na=False, regex=True
         )
-        # C-suite pattern (titles that are hiring decision makers regardless of dept)
         csuite_mask = to_score["title"].str.contains(
             r"\bceo\b|\bcoo\b|\bcfo\b|\bchro\b|\bcpo\b"
             r"|chief executive|chief operating|chief financial"
             r"|chief technology|chief information(?! security)"
             r"|managing director|general manager"
             r"|\bpresident\b",
-            na=False, regex=True,
+            na=False,
+            regex=True,
         )
-
-        # Modest penalty for non-HR founders outside HR industry
-        to_score.loc[
-            founder_mask & ~to_score["hr_in_title"] & ~core_hr_ind, "final_score"
-        ] -= 0.10
-
-        # Leadership rescue: keep strong senior profiles out of hard reject.
-        # Excludes obviously non-buyer/student-type profiles.
         leadership_mask = to_score["title"].str.contains(
             r"\bsvp\b|\bavp\b|\bevp\b|\bvp\b|vice president|director|head of|"
             r"\bcfo\b|\bcto\b|\bcio\b|\bcoo\b|\bceo\b|chief|president|managing director|general manager",
@@ -188,6 +219,7 @@ class ICPEngine:
         )
         leadership_rescue_mask = leadership_mask & ~non_buyer_mask & ~to_score["bad_title"]
 
+        # ── Bucket assignment ──────────────────────────────────────────────
         to_score["bucket"] = "REJECT"
         to_score.loc[to_score["final_score"] >= 0.47, "bucket"] = "REVIEW"
         to_score.loc[to_score["final_score"] >= 0.54, "bucket"] = "ACCEPT"
@@ -198,11 +230,17 @@ class ICPEngine:
         ] = "ACCEPT"
         # Confirmed C-suite → ACCEPT (they own hiring budgets)
         to_score.loc[csuite_mask & ~to_score["bad_title"], "bucket"] = "ACCEPT"
-        # Strong leadership should at least be REVIEW, often ACCEPT.
-        to_score.loc[leadership_rescue_mask & (to_score["sem_score"] >= 0.58), "bucket"] = "REVIEW"
-        to_score.loc[leadership_rescue_mask & (to_score["sem_score"] >= 0.66), "bucket"] = "ACCEPT"
-        # Founder/co-founder profiles are treated as target decision makers.
+        # Strong leadership: rescue into REVIEW / ACCEPT by semantic confidence.
+        to_score.loc[
+            leadership_rescue_mask & (to_score["sem_score"] >= 0.58), "bucket"
+        ] = "REVIEW"
+        to_score.loc[
+            leadership_rescue_mask & (to_score["sem_score"] >= 0.66), "bucket"
+        ] = "ACCEPT"
+        # Founder / co-founder → ACCEPT (decision makers by definition)
         to_score.loc[founder_mask & ~to_score["bad_title"], "bucket"] = "ACCEPT"
+
+        to_score["reject_reason"] = ""
 
         return pd.concat([to_score, rejects], ignore_index=True)
 

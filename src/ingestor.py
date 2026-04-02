@@ -23,6 +23,8 @@ class DataIngestor:
         "linkedin",
         "industry",
         "num_employees",
+        "emp_lower",
+        "emp_upper",
         "source_type",
     ]
 
@@ -34,7 +36,31 @@ class DataIngestor:
             print(message)
 
     @staticmethod
+    def parse_employee_range(value: object) -> tuple[float, float]:
+        """Return (lower, upper) numeric bounds from a free-text headcount field.
+
+        Handles common formats:
+          "1001-5000", "1,001-5,000" → (1001.0, 5000.0)
+          "10001+"                   → (10001.0, inf)
+          "1500"                     → (1500.0, 1500.0)
+          NaN / ""                   → (nan, nan)
+        """
+        if pd.isna(value) or str(value).strip() in ("", "nan"):
+            return np.nan, np.nan
+        s = str(value).replace(",", "").strip()
+        if s.endswith("+"):
+            nums = re.findall(r"\d+", s)
+            return (float(nums[0]), float("inf")) if nums else (np.nan, np.nan)
+        nums = re.findall(r"\d+", s)
+        if not nums:
+            return np.nan, np.nan
+        lower = float(nums[0])
+        upper = float(nums[-1]) if len(nums) > 1 else lower
+        return lower, upper
+
+    @staticmethod
     def extract_employees(value: object) -> float:
+        """Legacy single-value extraction — returns the upper bound of a range."""
         if pd.isna(value) or str(value).strip() == "":
             return np.nan
         nums = re.findall(r"\d+", str(value).replace(",", ""))
@@ -158,8 +184,14 @@ class DataIngestor:
             if col not in df.columns:
                 df[col] = ""
 
-        if "num_employees" in df.columns and df["num_employees"].dtype == object:
-            df["num_employees"] = df["num_employees"].apply(cls.extract_employees)
+        # Preserve raw num_employees string for display, then derive both bounds.
+        raw_emp = df["num_employees"].copy()
+        if raw_emp.dtype == object:
+            df["num_employees"] = raw_emp.apply(cls.extract_employees)
+
+        bounds = raw_emp.apply(cls.parse_employee_range)
+        df["emp_lower"] = bounds.apply(lambda t: t[0])
+        df["emp_upper"] = bounds.apply(lambda t: t[1])
 
         return df[cls.UNIVERSAL_COLS]
 

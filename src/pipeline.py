@@ -40,10 +40,11 @@ class UnifiedPipeline:
         self,
         enable_semantic: bool = True,
         logger: Optional[Callable[[str], None]] = None,
+        file_list: Optional[List[Path]] = None,
     ) -> PipelineResult:
         self.output_dir.mkdir(parents=True, exist_ok=True)
 
-        csv_files = self.discover_csvs()
+        csv_files = file_list if file_list is not None else self.discover_csvs()
         if not csv_files:
             raise FileNotFoundError(f"No CSV files found in {self.input_dir}")
 

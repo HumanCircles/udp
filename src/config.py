@@ -119,3 +119,22 @@ ICP_TITLES: List[str] = [
 
 MODEL_NAME = "BAAI/bge-small-en-v1.5"
 
+# ── Industry filters ───────────────────────────────────────────────────────
+# Regex applied against the normalised `industry` field (lowercase).
+# Records whose industry matches EXCLUDED_INDUSTRIES_PAT are hard-rejected.
+# Records in TARGET_INDUSTRIES_PAT receive a scoring bonus.
+EXCLUDED_INDUSTRIES_PAT: str = (
+    r"staffing|recruiting|recruitment|executive search|"
+    r"outsourc|\brpo\b|\bpeo\b|professional employer|"
+    r"talent agency|placement agency|workforce solution"
+)
+
+TARGET_INDUSTRIES_PAT: str = (
+    r"\bhealthcare\b|\bhealth care\b|\bhospital\b|\bmedical\b|dental|pharma|biotech|clinical|wellness|"
+    r"\bconstruction\b|contractor|civil engineering|"
+    r"\bsoftware\b|\btechnology\b|\btech\b|saas|it services|computer|internet|cloud|"
+    r"\binsurance\b|"
+    r"\bretail\b|consumer goods|e[\-\s]?commerce|wholesale|"
+    r"manufactur|\bindustrial\b|fabricat|\bmachinery\b|\bautomotive\b"
+)
+
