@@ -2,3 +2,4 @@ pandas
 numpy
 tqdm
 sentence-transformers
+streamlit>=1.35

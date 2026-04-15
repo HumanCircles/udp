@@ -1,0 +1,10 @@
+venv/
+.venv/
+data/
+__pycache__/
+.git/
+*.pyc
+docs/
+tests/
+launch_dashboard.py
+run_broad_icp.py
