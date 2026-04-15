@@ -1,0 +1,6 @@
+Title,Company,Email,Industry,# Employees,City,State,Seniority,Departments,Person Linkedin Url,Work Direct Phone
+Director of Talent Acquisition,Acme Corp,alice@acme.com,Healthcare,1200,New York,New York,director,HR,https://linkedin.com/in/alice,
+CEO,Beta Inc,bob@beta.com,Software & Technology,500,San Francisco,California,c suite,C-Suite,https://linkedin.com/in/bob,
+Sales Rep,Gamma Ltd,carol@gamma.com,Retail,300,Chicago,Illinois,entry,Sales,https://linkedin.com/in/carol,
+VP of Human Resources,Delta Co,dave@delta.com,Construction,2500,Austin,Texas,vp,HR,https://linkedin.com/in/dave,
+Recruiter,Epsilon Inc,eve@epsilon.com,Staffing and Recruiting,800,Miami,Florida,entry,HR,https://linkedin.com/in/eve,
