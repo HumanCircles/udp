@@ -10,6 +10,8 @@ from typing import Callable, List, Optional
 import numpy as np
 import pandas as pd
 
+from src.config import STATE_TIMEZONE
+
 
 class DataIngestor:
     """Detects known source schemas and maps them into one universal schema."""
@@ -21,10 +23,16 @@ class DataIngestor:
         "email",
         "phone",
         "linkedin",
+        "linkedin_sales_nav",
         "industry",
         "num_employees",
         "emp_lower",
         "emp_upper",
+        "city",
+        "state",
+        "timezone",
+        "seniority",
+        "departments",
         "source_type",
     ]
 
@@ -95,7 +103,25 @@ class DataIngestor:
             ).str.strip()
             df["email"] = ""
             df["phone"] = ""
+            df["city"] = ""
+            df["state"] = ""
             df["source_type"] = "PhantomBuster"
+
+        # LinkedIn Sales Navigator search results (CSV; same shape as common xlsx exports).
+        # profileUrl = Sales Nav lead URL; defaultProfileUrl = public /in/ profile.
+        elif "profileUrl" in cols and "defaultProfileUrl" in cols and "companyName" in cols:
+            df["name"] = df.get("fullName", pd.Series("", index=df.index)).fillna("").astype(str).str.strip()
+            df["title"] = df.get("title", pd.Series("", index=df.index)).fillna("").astype(str)
+            df["company"] = df.get("companyName", pd.Series("", index=df.index)).fillna("").astype(str)
+            df["email"] = ""
+            df["phone"] = ""
+            df["linkedin"] = df.get("defaultProfileUrl", pd.Series("", index=df.index)).fillna("").astype(str).str.strip()
+            df["linkedin_sales_nav"] = df.get("profileUrl", pd.Series("", index=df.index)).fillna("").astype(str).str.strip()
+            df["industry"] = df.get("industry", pd.Series("", index=df.index)).fillna("").astype(str)
+            df["city"] = ""
+            df["state"] = df.get("location", pd.Series("", index=df.index)).fillna("").astype(str)
+            df["num_employees"] = np.nan
+            df["source_type"] = "LinkedIn-SalesNav-Result"
 
         # Apollo exports (full — has Departments + Seniority columns)
         elif "Departments" in cols and "Seniority" in cols:
@@ -108,6 +134,10 @@ class DataIngestor:
                     "Person Linkedin Url": "linkedin",
                     "Industry": "industry",
                     "# Employees": "num_employees",
+                    "City": "city",
+                    "State": "state",
+                    "Seniority": "seniority",
+                    "Departments": "departments",
                 }
             )
             # Build name from First Name + Last Name (full Apollo has no combined Name col)
@@ -158,6 +188,8 @@ class DataIngestor:
                 ),
             ).fillna("").astype(str)
             df["industry"] = df.get("Industry", pd.Series("", index=df.index)).fillna("").astype(str)
+            df["city"] = df.get("City", pd.Series("", index=df.index)).fillna("").astype(str)
+            df["state"] = df.get("State", pd.Series("", index=df.index)).fillna("").astype(str)
             df["num_employees"] = np.nan
             df["source_type"] = "Apollo-Simplified"
 
@@ -174,6 +206,8 @@ class DataIngestor:
                     "Industry": "industry",
                 }
             )
+            df["city"] = ""
+            df["state"] = ""
             df["num_employees"] = np.nan
             df["source_type"] = "Aggregated"
         else:
@@ -192,6 +226,15 @@ class DataIngestor:
         bounds = raw_emp.apply(cls.parse_employee_range)
         df["emp_lower"] = bounds.apply(lambda t: t[0])
         df["emp_upper"] = bounds.apply(lambda t: t[1])
+
+        # Derive timezone from state (full name → ET/CT/MT/PT).
+        df["state"] = df["state"].fillna("").astype(str).str.strip()
+        df["timezone"] = (
+            df["state"]
+            .str.title()
+            .map(STATE_TIMEZONE)
+            .fillna("")
+        )
 
         return df[cls.UNIVERSAL_COLS]
 

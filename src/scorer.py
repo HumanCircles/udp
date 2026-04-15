@@ -19,6 +19,31 @@ from src.config import (
 
 
 @dataclass
+class ICPConfig:
+    """Tunable ICP parameters.  Defaults = narrow (1000-2000 emp, target industries).
+
+    Pass a custom instance to override any criteria at runtime — the dashboard
+    builds one dynamically from checkboxes so no config file edit is needed.
+    """
+    emp_min: int = 1_000
+    emp_max: int = 2_000
+    apply_industry_filter: bool = True    # hard-reject staffing/recruiting
+    apply_industry_bonus: bool = True     # +0.12 for target industries
+    # Override these to inject dashboard-selected industry patterns.
+    # None means "use the module-level defaults from config.py".
+    target_industries_pat: str | None = None
+    excluded_industries_pat: str | None = None
+    # Seniority whitelist — if set, records NOT in this list are hard-rejected.
+    # Values match the lowercase `seniority` field from Apollo exports.
+    # Empty string seniority (unknown) always passes.
+    seniority_include: list | None = None   # e.g. ["c suite","vp","director","founder","owner"]
+    # Contact quality gates
+    require_email: bool = False
+    require_phone: bool = False
+    require_linkedin: bool = False
+
+
+@dataclass
 class SemanticArtifacts:
     model: object
     icp_vectors: np.ndarray
@@ -31,8 +56,10 @@ class ICPEngine:
         self,
         enable_semantic: bool = True,
         logger: Optional[Callable[[str], None]] = None,
+        icp_config: Optional[ICPConfig] = None,
     ):
         self.logger = logger
+        self.config = icp_config if icp_config is not None else ICPConfig()
         self.semantic: Optional[SemanticArtifacts] = None
         if enable_semantic:
             self.semantic = self._load_semantic_stack()
@@ -127,25 +154,55 @@ class ICPEngine:
 
         # ── Hard rejects ───────────────────────────────────────────────────
         # 1. Bad title (non-decision-maker role not rescued by HR keywords).
-        # 2. Excluded industry (staffing / recruiting agencies).
-        # 3. Employee count definitively outside [1000, 2000].
-        excl_industry_mask = (scored["industry"] != "") & scored["industry"].str.contains(
-            EXCLUDED_INDUSTRIES_PAT, na=False, regex=True
-        )
+        # 2. Excluded industry (staffing / recruiting) — only when filter is on.
+        # 3. Employee count outside [emp_min, emp_max] — only when bounds > 0.
+        cfg = self.config
+
+        excl_pat = cfg.excluded_industries_pat if cfg.excluded_industries_pat is not None else EXCLUDED_INDUSTRIES_PAT
+        if cfg.apply_industry_filter:
+            excl_industry_mask = (scored["industry"] != "") & scored["industry"].str.contains(
+                excl_pat, na=False, regex=True
+            )
+        else:
+            excl_industry_mask = pd.Series(False, index=scored.index)
 
         if "emp_lower" in scored.columns and "emp_upper" in scored.columns:
             emp_lo = pd.to_numeric(scored["emp_lower"], errors="coerce")
             emp_hi = pd.to_numeric(scored["emp_upper"], errors="coerce")
         else:
-            emp_lo = pd.to_numeric(scored.get("num_employees", pd.Series(dtype=float, index=scored.index)), errors="coerce")
+            emp_lo = pd.to_numeric(
+                scored.get("num_employees", pd.Series(dtype=float, index=scored.index)),
+                errors="coerce",
+            )
             emp_hi = emp_lo.copy()
 
         emp_reject_mask = (
-            (emp_hi.notna() & (emp_hi < 1_000)) |
-            (emp_lo.notna() & (emp_lo > 2_000))
+            (emp_hi.notna() & (emp_hi < cfg.emp_min)) |
+            (emp_lo.notna() & (emp_lo > cfg.emp_max))
         )
 
-        hard_reject_mask = scored["bad_title"] | excl_industry_mask | emp_reject_mask
+        # Seniority filter — reject if seniority field is known AND not in whitelist.
+        if cfg.seniority_include:
+            sen = scored.get("seniority", pd.Series("", index=scored.index)).fillna("").astype(str).str.lower().str.strip()
+            seniority_reject_mask = (sen != "") & ~sen.isin([s.lower() for s in cfg.seniority_include])
+        else:
+            seniority_reject_mask = pd.Series(False, index=scored.index)
+
+        # Contact quality gates.
+        email_reject   = pd.Series(False, index=scored.index)
+        phone_reject   = pd.Series(False, index=scored.index)
+        linkedin_reject = pd.Series(False, index=scored.index)
+        if cfg.require_email:
+            email_reject = scored.get("email", pd.Series("", index=scored.index)).fillna("").astype(str).str.strip().eq("")
+        if cfg.require_phone:
+            phone_reject = scored.get("phone", pd.Series("", index=scored.index)).fillna("").astype(str).str.strip().eq("")
+        if cfg.require_linkedin:
+            linkedin_reject = scored.get("linkedin", pd.Series("", index=scored.index)).fillna("").astype(str).str.strip().eq("")
+
+        hard_reject_mask = (
+            scored["bad_title"] | excl_industry_mask | emp_reject_mask |
+            seniority_reject_mask | email_reject | phone_reject | linkedin_reject
+        )
 
         reject_reason_series = pd.Series("bad_title", index=scored.index)
         reject_reason_series[excl_industry_mask] = "excluded_industry"
@@ -187,11 +244,13 @@ class ICPEngine:
                 0.35 * (to_score["struct_score"].clip(lower=0) / max_s)
             )
 
-        # Industry bonus: +0.12 for records in a target industry.
-        target_ind_mask = (to_score["industry"] != "") & to_score["industry"].str.contains(
-            TARGET_INDUSTRIES_PAT, na=False, regex=True
-        )
-        to_score.loc[target_ind_mask, "final_score"] += 0.12
+        # Industry bonus: +0.12 for records in a target industry (when enabled).
+        if cfg.apply_industry_bonus:
+            tgt_pat = cfg.target_industries_pat if cfg.target_industries_pat is not None else TARGET_INDUSTRIES_PAT
+            target_ind_mask = (to_score["industry"] != "") & to_score["industry"].str.contains(
+                tgt_pat, na=False, regex=True
+            )
+            to_score.loc[target_ind_mask, "final_score"] += 0.12
 
         # ── Decision-maker masks ───────────────────────────────────────────
         founder_mask = to_score["title"].str.contains(

@@ -11,7 +11,7 @@ import pandas as pd
 from src.cleaner import DataCleaner
 from src.config import INPUT_DIR, OUTPUT_DIR
 from src.ingestor import DataIngestor
-from src.scorer import ICPEngine
+from src.scorer import ICPConfig, ICPEngine
 
 
 @dataclass
@@ -41,6 +41,7 @@ class UnifiedPipeline:
         enable_semantic: bool = True,
         logger: Optional[Callable[[str], None]] = None,
         file_list: Optional[List[Path]] = None,
+        icp_config: Optional[ICPConfig] = None,
     ) -> PipelineResult:
         self.output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -58,7 +59,7 @@ class UnifiedPipeline:
             logger, f"Deduplicated from {len(master_df)} to {len(clean_df)} unique records."
         )
 
-        engine = ICPEngine(enable_semantic=enable_semantic, logger=logger)
+        engine = ICPEngine(enable_semantic=enable_semantic, logger=logger, icp_config=icp_config)
         final_df = engine.process(clean_df)
 
         output_files: List[Path] = []
